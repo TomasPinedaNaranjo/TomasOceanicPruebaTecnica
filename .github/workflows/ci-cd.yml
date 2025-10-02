@@ -1,0 +1,253 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main, develop ]
+  workflow_dispatch:
+
+env:
+  PYTHON_VERSION: '3.11'
+  SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+
+jobs:
+  # Job 1: Pruebas unitarias
+  test:
+    name: 🧪 Ejecutar Pruebas Unitarias
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout código
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Necesario para SonarQube
+    
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-mock requests-mock
+    
+    - name: 🧪 Ejecutar pruebas unitarias
+      run: |
+        pytest tests/ --cov=. --cov-report=xml --cov-report=html --junitxml=test-results.xml -v
+    
+    - name: 📊 Subir reporte de cobertura
+      uses: codecov/codecov-action@v3
+      if: success()
+      with:
+        file: ./coverage.xml
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+    
+    - name: 📁 Subir artefactos de pruebas
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: test-results
+        path: |
+          test-results.xml
+          htmlcov/
+          coverage.xml
+
+  # Job 2: Análisis de calidad con SonarQube
+  sonar:
+    name: 🔍 Análisis de Calidad (SonarQube)
+    runs-on: ubuntu-latest
+    needs: test
+    if: github.event_name == 'pull_request'
+    
+    steps:
+    - name: 📥 Checkout código
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-mock requests-mock
+    
+    - name: 🧪 Ejecutar pruebas para SonarQube
+      run: |
+        pytest tests/ --cov=. --cov-report=xml --junitxml=test-results.xml -v
+    
+    - name: 📥 Descargar artefactos de pruebas
+      uses: actions/download-artifact@v3
+      with:
+        name: test-results
+        path: ./
+    
+    - name: 🔍 Ejecutar análisis de SonarQube
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      run: |
+        # Instalar SonarQube Scanner
+        wget https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
+        unzip sonar-scanner-cli-4.8.0.2856-linux.zip
+        export PATH=$PATH:./sonar-scanner-4.8.0.2856-linux/bin
+        
+        # Ejecutar análisis
+        sonar-scanner \
+          -Dsonar.projectKey=mars-weather-monitor \
+          -Dsonar.organization=tu-organizacion \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.token=$SONAR_TOKEN \
+          -Dsonar.python.coverage.reportPaths=coverage.xml \
+          -Dsonar.python.xunit.reportPath=test-results.xml \
+          -Dsonar.qualitygate.wait=true
+
+  # Job 3: Análisis de seguridad
+  security:
+    name: 🔒 Análisis de Seguridad
+    runs-on: ubuntu-latest
+    needs: test
+    
+    steps:
+    - name: 📥 Checkout código
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install bandit safety
+    
+    - name: 🔒 Análisis de seguridad con Bandit
+      run: |
+        bandit -r . -f json -o bandit-report.json || true
+        bandit -r . -f txt
+    
+    - name: 🛡️ Verificar vulnerabilidades con Safety
+      run: |
+        safety check --json --output safety-report.json || true
+        safety check
+    
+    - name: 📁 Subir reportes de seguridad
+      uses: actions/upload-artifact@v3
+      if: always()
+      with:
+        name: security-reports
+        path: |
+          bandit-report.json
+          safety-report.json
+
+  # Job 4: Linting y formateo
+  lint:
+    name: 🧹 Linting y Formateo
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout código
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Instalar herramientas de linting
+      run: |
+        python -m pip install --upgrade pip
+        pip install flake8 black isort mypy
+    
+    - name: 🧹 Verificar formateo con Black
+      run: |
+        black --check --diff .
+    
+    - name: 📋 Verificar orden de imports con isort
+      run: |
+        isort --check-only --diff .
+    
+    - name: 🔍 Linting con Flake8
+      run: |
+        flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics
+        flake8 . --count --exit-zero --max-complexity=10 --max-line-length=127 --statistics
+    
+    - name: 🔬 Verificación de tipos con MyPy
+      run: |
+        mypy . --ignore-missing-imports || true
+
+  # Job 5: Build y validación
+  build:
+    name: 🏗️ Build y Validación
+    runs-on: ubuntu-latest
+    needs: [test, lint, security]
+    
+    steps:
+    - name: 📥 Checkout código
+      uses: actions/checkout@v4
+    
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    
+    - name: 🏗️ Validar sintaxis de Python
+      run: |
+        python -m py_compile *.py
+        find . -name "*.py" -exec python -m py_compile {} \;
+    
+    - name: 📋 Verificar estructura del proyecto
+      run: |
+        echo "✅ Estructura del proyecto validada"
+        ls -la
+        echo "📁 Archivos Python encontrados:"
+        find . -name "*.py" -not -path "./.github/*" -not -path "./venv/*" -not -path "./env/*"
+
+  # Job 6: Notificaciones
+  notify:
+    name: 📢 Notificaciones
+    runs-on: ubuntu-latest
+    needs: [test, sonar, security, lint, build]
+    if: always()
+    
+    steps:
+    - name: 📢 Notificar resultado del pipeline
+      run: |
+        if [ "${{ needs.test.result }}" == "success" ] && [ "${{ needs.lint.result }}" == "success" ] && [ "${{ needs.build.result }}" == "success" ]; then
+          echo "✅ Pipeline completado exitosamente"
+          echo "🧪 Pruebas: ${{ needs.test.result }}"
+          echo "🔍 SonarQube: ${{ needs.sonar.result }}"
+          echo "🔒 Seguridad: ${{ needs.security.result }}"
+          echo "🧹 Linting: ${{ needs.lint.result }}"
+          echo "🏗️ Build: ${{ needs.build.result }}"
+        else
+          echo "❌ Pipeline falló"
+          echo "🧪 Pruebas: ${{ needs.test.result }}"
+          echo "🔍 SonarQube: ${{ needs.sonar.result }}"
+          echo "🔒 Seguridad: ${{ needs.security.result }}"
+          echo "🧹 Linting: ${{ needs.lint.result }}"
+          echo "🏗️ Build: ${{ needs.build.result }}"
+          exit 1
+        fi
+

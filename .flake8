@@ -1,0 +1,30 @@
+[flake8]
+max-line-length = 127
+max-complexity = 10
+exclude = 
+    .git,
+    __pycache__,
+    .venv,
+    venv,
+    env,
+    sonar-env,
+    .github,
+    tests,
+    htmlcov,
+    .pytest_cache,
+    *.db,
+    node_modules
+ignore = 
+    E203,  # whitespace before ':'
+    E501,  # line too long (handled by black)
+    W503,  # line break before binary operator
+    E402,  # module level import not at top of file
+per-file-ignores =
+    __init__.py:F401
+    tests/*:S101
+    tests/*:S106
+    tests/*:S108
+    tests/*:S311
+    tests/*:S603
+    tests/*:S607
+

@@ -1,0 +1,23 @@
+# Dependencias principales del proyecto
+requests>=2.31.0
+python-dotenv>=1.0.0
+
+# Dependencias para testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+pytest-mock>=3.10.0
+requests-mock>=1.10.0
+
+# Dependencias para linting y calidad de código
+flake8>=6.0.0
+black>=23.0.0
+isort>=5.12.0
+mypy>=1.0.0
+
+# Dependencias para análisis de seguridad
+bandit>=1.7.0
+safety>=2.3.0
+
+# Dependencias para cobertura de código
+coverage>=7.0.0
+

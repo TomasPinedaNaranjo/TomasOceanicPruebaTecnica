@@ -1,0 +1,129 @@
+name: SonarQube Analysis
+
+on:
+  pull_request:
+    branches: [ main, develop ]
+  push:
+    branches: [ main ]
+
+env:
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  sonar-analysis:
+    name: 🔍 Análisis de SonarQube
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: 📥 Checkout código
+      uses: actions/checkout@v4
+      with:
+        fetch-depth: 0  # Necesario para análisis de SonarQube
+    
+    - name: 🐍 Configurar Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: 'pip'
+    
+    - name: 📦 Instalar dependencias
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install pytest pytest-cov pytest-mock requests-mock
+    
+    - name: 🧪 Ejecutar pruebas con cobertura
+      run: |
+        pytest tests/ --cov=. --cov-report=xml --cov-report=html --junitxml=test-results.xml -v
+    
+    - name: 🔍 Ejecutar análisis de SonarQube
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+      run: |
+        # Instalar SonarQube Scanner
+        wget -q https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-4.8.0.2856-linux.zip
+        unzip -q sonar-scanner-cli-4.8.0.2856-linux.zip
+        export PATH=$PATH:./sonar-scanner-4.8.0.2856-linux/bin
+        
+        # Configurar variables para PR vs Push
+        if [ "${{ github.event_name }}" == "pull_request" ]; then
+          SONAR_PR_MODE="preview"
+          SONAR_PR_KEY="${{ github.event.pull_request.number }}"
+          SONAR_PR_BRANCH="${{ github.head_ref }}"
+          SONAR_PR_BASE="${{ github.base_ref }}"
+        else
+          SONAR_PR_MODE="publish"
+        fi
+        
+        # Ejecutar análisis
+        sonar-scanner \
+          -Dsonar.projectKey=mars-weather-monitor \
+          -Dsonar.organization=tu-organizacion \
+          -Dsonar.host.url=https://sonarcloud.io \
+          -Dsonar.token=$SONAR_TOKEN \
+          -Dsonar.python.coverage.reportPaths=coverage.xml \
+          -Dsonar.python.xunit.reportPath=test-results.xml \
+          -Dsonar.qualitygate.wait=true \
+          -Dsonar.analysis.mode=$SONAR_PR_MODE \
+          -Dsonar.pullrequest.key=$SONAR_PR_KEY \
+          -Dsonar.pullrequest.branch=$SONAR_PR_BRANCH \
+          -Dsonar.pullrequest.base=$SONAR_PR_BASE \
+          -Dsonar.sources=. \
+          -Dsonar.exclusions="**/__pycache__/**,**/venv/**,**/env/**,**/sonar-env/**,**/.github/**,**/tests/**,**/htmlcov/**,**/*.db,**/node_modules/**" \
+          -Dsonar.python.version=3.11 \
+          -Dsonar.cpd.python.minimumtokens=100 \
+          -Dsonar.python.complexity.threshold=10 \
+          -Dsonar.python.lines.threshold=1000
+
+    - name: 📊 Comentar en PR con resultados
+      if: github.event_name == 'pull_request'
+      uses: actions/github-script@v6
+      with:
+        script: |
+          const { data: comments } = await github.rest.issues.listComments({
+            owner: context.repo.owner,
+            repo: context.repo.repo,
+            issue_number: context.issue.number,
+          });
+          
+          const botComment = comments.find(comment => 
+            comment.user.type === 'Bot' && comment.body.includes('SonarQube')
+          );
+          
+          const commentBody = `## 🔍 Análisis de SonarQube Completado
+          
+          El análisis de calidad de código se ha ejecutado exitosamente.
+          
+          📊 **Resultados:**
+          - ✅ Análisis completado
+          - 📈 Cobertura de código generada
+          - 🔍 Issues detectados y reportados
+          
+          📋 **Detalles del análisis:**
+          - **Proyecto:** mars-weather-monitor
+          - **Branch:** ${{ github.head_ref }}
+          - **Base:** ${{ github.base_ref }}
+          - **Modo:** Preview
+          
+          🔗 **Ver resultados completos:** [SonarCloud](https://sonarcloud.io/dashboard?id=mars-weather-monitor)
+          
+          ---
+          *Este comentario se actualiza automáticamente con cada push al PR.*`;
+          
+          if (botComment) {
+            await github.rest.issues.updateComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              comment_id: botComment.id,
+              body: commentBody
+            });
+          } else {
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: commentBody
+            });
+          }
+
